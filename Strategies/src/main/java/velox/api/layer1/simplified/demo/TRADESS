@@ -1,0 +1,139 @@
+import velox.api.layer1.Layer1ApiProvider;
+import velox.api.layer1.Layer1ApiUser;
+import velox.api.layer1.data.*;
+import velox.api.layer1.simpledemo.SimpleLayer1User;
+
+import java.util.*;
+
+public class MyStrategy extends SimpleLayer1User implements Layer1ApiUser {
+
+    private final int emaPeriod = 50;
+    private final int atrPeriod = 14;
+    private final float riskRewardRatio = 2.0f;
+    private final float stopLossMultiplier = 1.0f;
+    private final float trailingStopMultiplier = 1.5f;
+    private final float volatilityThreshold = 1.0f;
+    private final float imbalanceThreshold = 1.5f;
+
+    private final List<Double> prices = new ArrayList<>();
+    private final List<Double> emaValues = new ArrayList<>();
+    private final List<Double> atrValues = new ArrayList<>();
+    private double cumulativeVolumeDelta = 0;
+
+    @Override
+    public void onInstrumentStateUpdated(String alias, InstrumentInfo instrumentInfo) {
+        // Initialize the strategy for the given instrument
+    }
+
+    @Override
+    public void onDepth(String alias, DepthQuote depthQuote) {
+        // Handle market depth updates
+    }
+
+    @Override
+    public void onTrade(String alias, TradeInfo tradeInfo) {
+        double price = tradeInfo.price;
+        double volume = tradeInfo.size;
+
+        prices.add(price);
+
+        // Update EMA
+        if (prices.size() >= emaPeriod) {
+            double ema = calculateEMA(prices, emaPeriod);
+            emaValues.add(ema);
+        }
+
+        // Update ATR
+        if (prices.size() >= atrPeriod) {
+            double atr = calculateATR(prices, atrPeriod);
+            atrValues.add(atr);
+        }
+
+        // Update Cumulative Volume Delta
+        if (tradeInfo.aggressorSide == TradeInfo.AggressorSide.BUY) {
+            cumulativeVolumeDelta += volume;
+        } else {
+            cumulativeVolumeDelta -= volume;
+        }
+
+        // Check for buy/sell signals
+        if (emaValues.size() > 0 && atrValues.size() > 0) {
+            double currentPrice = prices.get(prices.size() - 1);
+            double currentEMA = emaValues.get(emaValues.size() - 1);
+            double currentATR = atrValues.get(atrValues.size() - 1);
+
+            boolean buyCondition = currentPrice > currentEMA && cumulativeVolumeDelta > 0;
+            boolean sellCondition = currentPrice < currentEMA && cumulativeVolumeDelta < 0;
+
+            if (buyCondition) {
+                double stopLossLevel = currentPrice - (currentATR * stopLossMultiplier);
+                double takeProfitLevel = currentPrice + ((currentATR * stopLossMultiplier) * riskRewardRatio);
+                submitOrder(alias, true, currentPrice, stopLossLevel, takeProfitLevel);
+            }
+
+            if (sellCondition) {
+                double stopLossLevel = currentPrice + (currentATR * stopLossMultiplier);
+                double takeProfitLevel = currentPrice - ((currentATR * stopLossMultiplier) * riskRewardRatio);
+                submitOrder(alias, false, currentPrice, stopLossLevel, takeProfitLevel);
+            }
+        }
+    }
+
+    private double calculateEMA(List<Double> prices, int period) {
+        double ema = prices.get(0);
+        double multiplier = 2.0 / (period + 1);
+
+        for (int i = 1; i < prices.size(); i++) {
+            ema = ((prices.get(i) - ema) * multiplier) + ema;
+        }
+
+        return ema;
+    }
+
+    private double calculateATR(List<Double> prices, int period) {
+        double atr = 0;
+
+        for (int i = 1; i < prices.size(); i++) {
+            atr += Math.abs(prices.get(i) - prices.get(i - 1));
+        }
+
+        return atr / period;
+    }
+
+    private void submitOrder(String alias, boolean isBuy, double price, double stopLoss, double takeProfit) {
+        // Submit a market order with the specified stop loss and take profit levels
+        String orderType = isBuy ? "Buy" : "Sell";
+        System.out.println(orderType + " order submitted at price " + price + ", Stop Loss: " + stopLoss + ", Take Profit: " + takeProfit);
+    }
+
+    @Override
+    public void onOrderUpdated(String alias, OrderInfo orderInfo) {
+        // Handle order updates
+    }
+
+    @Override
+    public void onPositionUpdated(String alias, PositionInfo positionInfo) {
+        // Handle position updates
+    }
+
+    @Override
+    public void onBalanceUpdated(String alias, BalanceInfo balanceInfo) {
+        // Handle balance updates
+    }
+
+    @Override
+    public void onAlert(String alias, AlertInfo alertInfo) {
+        // Handle alerts
+    }
+
+    @Override
+    public void onEvent(String alias, String eventType, Object event) {
+        // Handle custom events
+    }
+
+    public static void main(String[] args) {
+        Layer1ApiProvider apiProvider = new Layer1ApiProvider();
+        MyStrategy strategy = new MyStrategy();
+        apiProvider.start(strategy);
+    }
+}
